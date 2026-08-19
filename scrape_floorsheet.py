@@ -1,87 +1,549 @@
 from selenium import webdriver
-from datetime import datetime
-from bs4 import BeautifulSoup
-import pandas as pd
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import sys
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
+from bs4 import BeautifulSoup
+
+from datetime import datetime
+import pandas as pd
+import os
+import sys
+import time
+
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+URL = "https://merolagani.com/Floorsheet.aspx"
+
+TABLE_CLASS = "table table-bordered table-striped table-hover sortable"
+
+OUTPUT_DIR = "data"
+
+PAGE_LOAD_TIMEOUT = 240
+WAIT_TIMEOUT = 20
+
+
+# ============================================================
+# CREATE DRIVER
+# ============================================================
+
+def create_driver():
+    """
+    Create and configure a headless Chrome WebDriver.
+    """
+
+    options = Options()
+
+    # Modern headless mode
+    options.add_argument("--headless=new")
+
+    # Required for GitHub Actions / Linux environments
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    # Additional stability options
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-infobars")
+
+    # Prevent unnecessary browser logs
+    options.add_argument("--log-level=3")
+
+    driver = webdriver.Chrome(options=options)
+
+    driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+
+    return driver
+
+
+# ============================================================
+# SEARCH FLOOR SHEET
+# ============================================================
 
 def search(driver, date):
     """
-    Date in mm/dd/yyyy
+    Search Merolagani floorsheet for a given date.
+
+    Date format:
+        mm/dd/yyyy
     """
-    driver.get("https://merolagani.com/Floorsheet.aspx")
-    element = WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.XPATH, "/html/body/form/div[4]/div[4]/div/div/div[1]/div[4]/input"))
+
+    print(f"Opening Merolagani Floorsheet...")
+    print(f"Searching date: {date}")
+
+    driver.get(URL)
+
+    # Wait for date input
+    date_input = WebDriverWait(driver, WAIT_TIMEOUT).until(
+        EC.presence_of_element_located(
+            (
+                By.XPATH,
+                "/html/body/form/div[4]/div[4]/div/div/div[1]/div[4]/input"
+            )
+        )
     )
-    date_input = driver.find_element_by_xpath('/html/body/form/div[4]/div[4]/div/div/div[1]/div[4]/input')
-    search_btn = driver.find_element_by_xpath('/html/body/form/div[4]/div[4]/div/div/div[2]/a[1]')
+
+    # Find search button
+    search_btn = WebDriverWait(driver, WAIT_TIMEOUT).until(
+        EC.element_to_be_clickable(
+            (
+                By.XPATH,
+                "/html/body/form/div[4]/div[4]/div/div/div[2]/a[1]"
+            )
+        )
+    )
+
+    # Clear existing value
+    date_input.clear()
+
+    # Enter date
     date_input.send_keys(date)
+
+    print("Submitting search...")
+
+    # Click search
     search_btn.click()
-    if driver.find_elements_by_xpath("//*[contains(text(), 'Could not find floorsheet matching the search criteria')]"):
-        print("No data found for the given search.")
-        print("Script Aborted")
-        driver.close()
-        sys.exit()
+
+    # Give page a moment to update
+    time.sleep(2)
+
+    # Check for no-data message
+    try:
+        WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//*[contains(text(), "
+                    "'Could not find floorsheet matching the search criteria')]"
+                )
+            )
+        )
+
+        print("No data found for the given date.")
+        return False
+
+    except TimeoutException:
+        # No "no data" message found
+        pass
+
+    print("Search completed.")
+
+    return True
 
 
-def get_page_table(driver, table_class):
-    element = WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.XPATH, "/html/body/form/div[4]/div[5]/div/div[4]/table"))
+# ============================================================
+# GET TABLE FROM CURRENT PAGE
+# ============================================================
+
+def get_page_table(driver):
+    """
+    Extract the floorsheet table from the current page.
+    """
+
+    print("Waiting for floorsheet table...")
+
+    WebDriverWait(driver, WAIT_TIMEOUT).until(
+        EC.presence_of_element_located(
+            (
+                By.XPATH,
+                "/html/body/form/div[4]/div[5]/div/div[4]/table"
+            )
+        )
     )
-    soup = BeautifulSoup(driver.page_source,'html')
-    table = soup.find("table", {"class":table_class})
-    tab_data = [[cell.text.replace('\r', '').replace('\n', '') for cell in row.find_all(["th","td"])]
-                        for row in table.find_all("tr")]
-    df = pd.DataFrame(tab_data)
-    return df
 
+    # Get page source
+    soup = BeautifulSoup(driver.page_source, "html.parser")
+
+    # Find table
+    table = soup.find(
+        "table",
+        {"class": TABLE_CLASS}
+    )
+
+    if table is None:
+        raise RuntimeError("Floorsheet table could not be found.")
+
+    # Extract rows
+    tab_data = []
+
+    for row in table.find_all("tr"):
+
+        cells = row.find_all(["th", "td"])
+
+        row_data = []
+
+        for cell in cells:
+            value = cell.get_text(
+                strip=True
+            )
+
+            row_data.append(value)
+
+        if row_data:
+            tab_data.append(row_data)
+
+    if not tab_data:
+        raise RuntimeError("Floorsheet table contains no data.")
+
+    return pd.DataFrame(tab_data)
+
+
+# ============================================================
+# SCRAPE ALL PAGES
+# ============================================================
 
 def scrape_data(driver, date):
-    search(driver, date = date)
-    df = pd.DataFrame()
-    count = 0
+    """
+    Search and scrape all floorsheet pages.
+    """
+
+    found = search(driver, date)
+
+    if not found:
+        return pd.DataFrame()
+
+    all_pages = []
+
+    page_number = 0
+
     while True:
-        count += 1
-        print(f"Scraping page {count}")
-        page_table_df = get_page_table(driver, table_class="table table-bordered table-striped table-hover sortable")
-        df = df.append(page_table_df, ignore_index = True)
+
+        page_number += 1
+
+        print(f"Scraping page {page_number}...")
+
         try:
-            next_btn = driver.find_element_by_link_text('Next')
-            driver.execute_script("arguments[0].click();", next_btn)
-        except NoSuchElementException:
+
+            page_table_df = get_page_table(driver)
+
+            print(
+                f"Rows found on page {page_number}: "
+                f"{len(page_table_df)}"
+            )
+
+            all_pages.append(page_table_df)
+
+        except Exception as e:
+
+            print(
+                f"Error scraping page {page_number}: {e}"
+            )
+
             break
-    driver.close()
+
+        # ----------------------------------------------------
+        # Find Next button
+        # ----------------------------------------------------
+
+        try:
+
+            next_btn = driver.find_element(
+                By.LINK_TEXT,
+                "Next"
+            )
+
+            # Check whether button is disabled
+            classes = next_btn.get_attribute("class") or ""
+
+            if "disabled" in classes.lower():
+
+                print("Next button is disabled.")
+                break
+
+            print("Moving to next page...")
+
+            driver.execute_script(
+                "arguments[0].click();",
+                next_btn
+            )
+
+            # Wait for next page to load
+            time.sleep(1)
+
+        except NoSuchElementException:
+
+            print("No more pages found.")
+            break
+
+        except Exception as e:
+
+            print(
+                f"Could not move to next page: {e}"
+            )
+
+            break
+
+    # --------------------------------------------------------
+    # Combine all pages
+    # --------------------------------------------------------
+
+    if not all_pages:
+
+        return pd.DataFrame()
+
+    print(
+        f"Combining {len(all_pages)} pages..."
+    )
+
+    df = pd.concat(
+        all_pages,
+        ignore_index=True
+    )
+
     return df
 
 
+# ============================================================
+# CLEAN DATA
+# ============================================================
+
 def clean_df(df):
-    new_df = df.drop_duplicates(keep='first') # Dropping Duplicates
-    new_header = new_df.iloc[0] # grabing the first row for the header
-    new_df = new_df[1:] # taking the data lower than the header row
-    new_df.columns = new_header # setting the header row as the df header
-    new_df.drop(["#"], axis=1, inplace=True)
-    new_df["Rate"] = new_df["Rate"].apply(lambda x:float(x.replace(",", ""))) # Convert Rate to Float
-    new_df["Amount"] = new_df["Amount"].apply(lambda x:float(x.replace(",", ""))) # Convert Amount to Float
+    """
+    Clean scraped floorsheet dataframe.
+    """
+
+    if df.empty:
+
+        print("DataFrame is empty.")
+
+        return df
+
+    print("Cleaning dataframe...")
+
+    # --------------------------------------------------------
+    # Remove duplicate rows
+    # --------------------------------------------------------
+
+    new_df = df.drop_duplicates(
+        keep="first"
+    ).copy()
+
+    # --------------------------------------------------------
+    # First row becomes header
+    # --------------------------------------------------------
+
+    new_header = new_df.iloc[0]
+
+    new_df = new_df.iloc[1:].copy()
+
+    new_df.columns = new_header
+
+    # --------------------------------------------------------
+    # Remove '#' column
+    # --------------------------------------------------------
+
+    if "#" in new_df.columns:
+
+        new_df.drop(
+            columns=["#"],
+            inplace=True
+        )
+
+    # --------------------------------------------------------
+    # Clean Rate
+    # --------------------------------------------------------
+
+    if "Rate" in new_df.columns:
+
+        new_df["Rate"] = (
+            new_df["Rate"]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.strip()
+        )
+
+        new_df["Rate"] = pd.to_numeric(
+            new_df["Rate"],
+            errors="coerce"
+        )
+
+    # --------------------------------------------------------
+    # Clean Amount
+    # --------------------------------------------------------
+
+    if "Amount" in new_df.columns:
+
+        new_df["Amount"] = (
+            new_df["Amount"]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.strip()
+        )
+
+        new_df["Amount"] = pd.to_numeric(
+            new_df["Amount"],
+            errors="coerce"
+        )
+
+    # --------------------------------------------------------
+    # Reset index
+    # --------------------------------------------------------
+
+    new_df.reset_index(
+        drop=True,
+        inplace=True
+    )
+
     return new_df
 
 
-def main():
-    options = Options()
-    options.headless = True
-    driver = webdriver.Chrome(options=options) # Start Browser
-    driver.set_page_load_timeout(240)
-    date = datetime.today().strftime('%m/%d/%Y') # Get today's date
-    search(driver, date) # Search the webpage
-    df = scrape_data(driver, date) # Scraping
-    final_df = clean_df(df) # Cleaning
-    file_name = date.replace("/", "_")
-    final_df.to_csv(f"data/{file_name}.csv", index=False) # Save file
+# ============================================================
+# SAVE DATA
+# ============================================================
 
+def save_data(df, date):
+    """
+    Save dataframe to CSV.
+    """
+
+    if df.empty:
+
+        print("No data to save.")
+
+        return None
+
+    # Create output directory
+    os.makedirs(
+        OUTPUT_DIR,
+        exist_ok=True
+    )
+
+    # Convert date
+    file_name = date.replace(
+        "/",
+        "_"
+    )
+
+    file_path = os.path.join(
+        OUTPUT_DIR,
+        f"{file_name}.csv"
+    )
+
+    # Save CSV
+    df.to_csv(
+        file_path,
+        index=False
+    )
+
+    print()
+    print("=" * 60)
+    print("DATA SAVED SUCCESSFULLY")
+    print("=" * 60)
+    print(f"File: {file_path}")
+    print(f"Rows: {len(df)}")
+    print(f"Columns: {len(df.columns)}")
+    print("=" * 60)
+
+    return file_path
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
+    print()
+    print("=" * 60)
+    print("MEROLAGANI FLOORSHEET SCRAPER")
+    print("=" * 60)
+
+    # --------------------------------------------------------
+    # Today's date
+    # --------------------------------------------------------
+
+    date = datetime.today().strftime(
+        "%m/%d/%Y"
+    )
+
+    print(f"Date: {date}")
+
+    driver = None
+
+    try:
+
+        # ----------------------------------------------------
+        # Start browser
+        # ----------------------------------------------------
+
+        print("Starting Chrome...")
+
+        driver = create_driver()
+
+        # ----------------------------------------------------
+        # Scrape
+        # ----------------------------------------------------
+
+        df = scrape_data(
+            driver,
+            date
+        )
+
+        # ----------------------------------------------------
+        # Check result
+        # ----------------------------------------------------
+
+        if df.empty:
+
+            print()
+            print("No floorsheet data found.")
+            print("Script finished.")
+
+            return
+
+        # ----------------------------------------------------
+        # Clean
+        # ----------------------------------------------------
+
+        final_df = clean_df(df)
+
+        # ----------------------------------------------------
+        # Save
+        # ----------------------------------------------------
+
+        save_data(
+            final_df,
+            date
+        )
+
+    except Exception as e:
+
+        print()
+        print("=" * 60)
+        print("ERROR")
+        print("=" * 60)
+        print(e)
+        print("=" * 60)
+
+        sys.exit(1)
+
+    finally:
+
+        # ----------------------------------------------------
+        # Always close browser
+        # ----------------------------------------------------
+
+        if driver is not None:
+
+            try:
+                driver.quit()
+
+            except Exception:
+                pass
+
+    print()
+    print("Script completed successfully.")
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()
