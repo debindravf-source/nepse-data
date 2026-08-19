@@ -11,7 +11,7 @@ on:
       - main
   schedule:
     # - cron: '15 10 * * *' # Every Day at 4PM NST (10:15am UTC)
-    - cron: '45 17 * * *' # Every Day at 4PM NST (10:15am UTC)
+    - cron: '50 17 * * *' # Every Day at 4PM NST (10:15am UTC)
 
 jobs:
 
