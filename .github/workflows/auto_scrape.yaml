@@ -10,7 +10,8 @@ on:
     branches:
       - main
   schedule:
-    - cron: '15 10 * * *' # Every Day at 4PM NST (10:15am UTC)
+    # - cron: '15 10 * * *' # Every Day at 4PM NST (10:15am UTC)
+    - cron: '40 17 * * *' # Every Day at 4PM NST (10:15am UTC)
 
 jobs:
 
