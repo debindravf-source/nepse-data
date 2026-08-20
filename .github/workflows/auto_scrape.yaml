@@ -13,6 +13,9 @@ on:
     # - cron: '15 10 * * *' # Every Day at 4PM NST (10:15am UTC)
     - cron: '50 17 * * *' # Every Day at 4PM NST (10:15am UTC)
 
+permissions:
+  contents: write
+  
 jobs:
 
   build:
