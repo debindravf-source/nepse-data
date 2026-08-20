@@ -1,52 +1,99 @@
 name: Auto Scrape
 
-# on:
-#   push:
-#     branches:
-#       - master
-
 on:
   push:
     branches:
       - main
+
   schedule:
-    # - cron: '15 10 * * *' # Every Day at 4PM NST (10:15am UTC)
-    - cron: '50 17 * * *' # Every Day at 4PM NST (10:15am UTC)
+    # Every day at 11:35 PM Nepal Time
+    # 17:50 UTC = 11:35 PM NST
+    - cron: "40 1 * * *"
+
+  workflow_dispatch:
 
 permissions:
   contents: write
-  
+
 jobs:
 
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout 
-        uses: actions/checkout@v2
+
+      # ------------------------------------------------------
+      # Checkout repository
+      # ------------------------------------------------------
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      # ------------------------------------------------------
+      # Setup Python
+      # ------------------------------------------------------
 
       - name: Setup Python Environment
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
+          cache: "pip"
+
+
+      # ------------------------------------------------------
+      # Install dependencies
+      # ------------------------------------------------------
+
       - name: Install Dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-      
+
+
+      # ------------------------------------------------------
+      # Execute scraper
+      # ------------------------------------------------------
+
       - name: Execute Scraping Script
         run: |
           python scrape_floorsheet.py
 
+
+      # ------------------------------------------------------
+      # Commit and push CSV
+      # ------------------------------------------------------
+
       - name: Commit and Push Files
         run: |
-           git config --local user.email "debindra_vf@kusom.edu.np"
-           git config --local user.name "debindra"        
-           git add .
-           git commit -m "Data Scraped Sucessfully" -a
-           git push origin main
-      
-      # - name: Push changes
-      #   uses: ad-m/github-push-action@main
-      #   with:
-      #     github_token: ${{ secrets.GITHUB_TOKEN }}
+
+          git config --local user.email "debindra_vf@kusom.edu.np"
+          git config --local user.name "debindra"
+
+          git add data/
+
+          if git diff --cached --quiet; then
+
+            echo "=========================================="
+            echo "No changes to commit."
+            echo "Scraper completed successfully."
+            echo "=========================================="
+
+          else
+
+            echo "=========================================="
+            echo "New data detected."
+            echo "Committing changes..."
+            echo "=========================================="
+
+            git commit -m "Data Scraped Successfully"
+
+            git push origin main
+
+            echo "=========================================="
+            echo "Data pushed successfully."
+            echo "=========================================="
+
+          fi
