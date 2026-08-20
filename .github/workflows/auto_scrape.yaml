@@ -1,30 +1,52 @@
 name: Auto Scrape
 
 on:
-  push:
-    branches:
-      - main
 
+  # ----------------------------------------------------------
+  # Automatic daily scraping
+  #
+  # 01:40 UTC = 4:00 AM Nepal Time
+  # ----------------------------------------------------------
   schedule:
-    # Every day at 11:35 PM Nepal Time
-    # 17:50 UTC = 11:35 PM NST
-    - cron: "40 1 * * *"
+    - cron: "15 10 * * *"
 
+  # ----------------------------------------------------------
+  # Manual execution
+  #
+  # Leave scrape_date empty:
+  #   → Python uses today's/run date
+  #
+  # Enter date:
+  #   → Python uses that date
+  # ----------------------------------------------------------
   workflow_dispatch:
+    inputs:
+      scrape_date:
+        description: "Date to scrape (MM/DD/YYYY). Leave empty for run date."
+        required: false
+        default: ""
+        type: string
+
+
+# ------------------------------------------------------------
+# GitHub Actions permission to commit/push CSV files
+# ------------------------------------------------------------
 
 permissions:
   contents: write
 
+
 jobs:
 
   build:
+
     runs-on: ubuntu-latest
 
     steps:
 
-      # ------------------------------------------------------
-      # Checkout repository
-      # ------------------------------------------------------
+      # ======================================================
+      # CHECKOUT REPOSITORY
+      # ======================================================
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,9 +54,9 @@ jobs:
           fetch-depth: 0
 
 
-      # ------------------------------------------------------
-      # Setup Python
-      # ------------------------------------------------------
+      # ======================================================
+      # SETUP PYTHON
+      # ======================================================
 
       - name: Setup Python Environment
         uses: actions/setup-python@v5
@@ -43,9 +65,9 @@ jobs:
           cache: "pip"
 
 
-      # ------------------------------------------------------
-      # Install dependencies
-      # ------------------------------------------------------
+      # ======================================================
+      # INSTALL DEPENDENCIES
+      # ======================================================
 
       - name: Install Dependencies
         run: |
@@ -53,18 +75,108 @@ jobs:
           pip install -r requirements.txt
 
 
-      # ------------------------------------------------------
-      # Execute scraper
-      # ------------------------------------------------------
+      # ======================================================
+      # SHOW DATE CONFIGURATION
+      # ======================================================
+
+      - name: Show Scrape Date
+        run: |
+
+          echo "=========================================="
+          echo "SCRAPE DATE CONFIGURATION"
+          echo "=========================================="
+
+          if [ -n "${{ inputs.scrape_date }}" ]; then
+            echo "Input date provided:"
+            echo "${{ inputs.scrape_date }}"
+          else
+            echo "No input date provided."
+            echo "Python will use the run date."
+          fi
+
+          echo "=========================================="
+
+
+      # ======================================================
+      # EXECUTE SCRAPER
+      # ======================================================
 
       - name: Execute Scraping Script
+        env:
+          SCRAPE_DATE: ${{ inputs.scrape_date }}
         run: |
+
+          echo "=========================================="
+          echo "STARTING MEROLAGANI SCRAPER"
+          echo "=========================================="
+
           python scrape_floorsheet.py
 
+          echo "=========================================="
+          echo "SCRAPER EXECUTION FINISHED"
+          echo "=========================================="
 
-      # ------------------------------------------------------
-      # Commit and push CSV
-      # ------------------------------------------------------
+
+      # ======================================================
+      # VERIFY DATA
+      # ======================================================
+
+      - name: Verify Scraped Data
+        run: |
+
+          echo "=========================================="
+          echo "VERIFYING SCRAPED DATA"
+          echo "=========================================="
+
+          if [ ! -d "data" ]; then
+
+            echo "ERROR: data directory does not exist."
+
+            exit 1
+
+          fi
+
+
+          echo ""
+          echo "Files in data directory:"
+          echo ""
+
+          ls -lah data/
+
+
+          echo ""
+          echo "CSV files:"
+          echo ""
+
+          if ls data/*.csv >/dev/null 2>&1; then
+
+            ls -lh data/*.csv
+
+          else
+
+            echo "ERROR: No CSV file was created."
+
+            exit 1
+
+          fi
+
+
+          echo ""
+          echo "Latest CSV:"
+          echo ""
+
+          ls -lt data/*.csv | head -1
+
+
+          echo ""
+          echo "=========================================="
+          echo "DATA VERIFICATION SUCCESSFUL"
+          echo "=========================================="
+
+
+      # ======================================================
+      # COMMIT AND PUSH CSV
+      # ======================================================
 
       - name: Commit and Push Files
         run: |
@@ -72,28 +184,50 @@ jobs:
           git config --local user.email "debindra_vf@kusom.edu.np"
           git config --local user.name "debindra"
 
+
+          # --------------------------------------------------
+          # Add only scraped data
+          # --------------------------------------------------
+
           git add data/
+
+
+          # --------------------------------------------------
+          # Check whether anything changed
+          # --------------------------------------------------
 
           if git diff --cached --quiet; then
 
+            echo ""
             echo "=========================================="
-            echo "No changes to commit."
+            echo "NO CHANGES TO COMMIT"
+            echo "=========================================="
             echo "Scraper completed successfully."
+            echo "There is no new data to commit."
             echo "=========================================="
 
           else
 
+            echo ""
             echo "=========================================="
-            echo "New data detected."
+            echo "NEW DATA DETECTED"
+            echo "=========================================="
+
+            git diff --cached --stat
+
+            echo ""
             echo "Committing changes..."
-            echo "=========================================="
 
             git commit -m "Data Scraped Successfully"
 
+            echo ""
+            echo "Pushing changes..."
+
             git push origin main
 
+            echo ""
             echo "=========================================="
-            echo "Data pushed successfully."
+            echo "DATA PUSHED SUCCESSFULLY"
             echo "=========================================="
 
           fi

@@ -35,23 +35,127 @@ WAIT_TIMEOUT = 20
 
 
 # ============================================================
+# DATE HANDLING
+# ============================================================
+
+def get_scrape_date():
+    """
+    Determine which date should be scraped.
+
+    Priority:
+        1. SCRAPE_DATE environment variable
+        2. Current/run date
+
+    Supported input formats:
+        MM/DD/YYYY
+        YYYY-MM-DD
+
+    Examples:
+        SCRAPE_DATE=08/19/2026
+        SCRAPE_DATE=2026-08-19
+        SCRAPE_DATE="" -> today's date
+    """
+
+    input_date = os.getenv("SCRAPE_DATE", "").strip()
+
+    # --------------------------------------------------------
+    # No input date -> use current/run date
+    # --------------------------------------------------------
+
+    if not input_date:
+
+        date = datetime.today().strftime("%m/%d/%Y")
+
+        print(
+            "No input date provided."
+        )
+
+        print(
+            f"Using run date: {date}"
+        )
+
+        return date
+
+    # --------------------------------------------------------
+    # Input date provided
+    # --------------------------------------------------------
+
+    print(
+        f"Input date received: {input_date}"
+    )
+
+    # --------------------------------------------------------
+    # Try MM/DD/YYYY
+    # --------------------------------------------------------
+
+    try:
+
+        parsed_date = datetime.strptime(
+            input_date,
+            "%m/%d/%Y"
+        )
+
+        date = parsed_date.strftime(
+            "%m/%d/%Y"
+        )
+
+        print(
+            f"Using input date: {date}"
+        )
+
+        return date
+
+    except ValueError:
+        pass
+
+    # --------------------------------------------------------
+    # Try YYYY-MM-DD
+    # --------------------------------------------------------
+
+    try:
+
+        parsed_date = datetime.strptime(
+            input_date,
+            "%Y-%m-%d"
+        )
+
+        date = parsed_date.strftime(
+            "%m/%d/%Y"
+        )
+
+        print(
+            f"Using input date: {date}"
+        )
+
+        return date
+
+    except ValueError:
+        pass
+
+    # --------------------------------------------------------
+    # Invalid date
+    # --------------------------------------------------------
+
+    raise ValueError(
+        "Invalid SCRAPE_DATE format. "
+        "Use MM/DD/YYYY or YYYY-MM-DD. "
+        f"Received: {input_date}"
+    )
+
+
+# ============================================================
 # CREATE CHROME DRIVER
 # ============================================================
 
 def create_driver():
     """
     Create and configure a headless Chrome WebDriver.
-
-    Designed for:
-        - Local execution
-        - GitHub Actions
-        - Modern Chrome / Selenium 4
     """
 
     options = Options()
 
     # --------------------------------------------------------
-    # Headless Chrome
+    # Modern headless mode
     # --------------------------------------------------------
 
     options.add_argument("--headless=new")
@@ -73,16 +177,13 @@ def create_driver():
     options.add_argument("--disable-infobars")
 
     # --------------------------------------------------------
-    # Disable browser notifications
+    # Disable notifications
     # --------------------------------------------------------
 
     options.add_argument("--disable-notifications")
 
     # --------------------------------------------------------
-    # Disable notification permission requests
-    #
-    # 1 = allow
-    # 2 = block
+    # Block notification permissions
     # --------------------------------------------------------
 
     prefs = {
@@ -104,7 +205,7 @@ def create_driver():
     )
 
     # --------------------------------------------------------
-    # Reduce Chrome logging
+    # Reduce Chrome logs
     # --------------------------------------------------------
 
     options.add_argument("--log-level=3")
@@ -148,7 +249,9 @@ def dismiss_alert(driver):
 
         alert.dismiss()
 
-        print("Browser alert dismissed.")
+        print(
+            "Browser alert dismissed."
+        )
 
         return True
 
@@ -186,7 +289,6 @@ def safe_click(driver, element):
 
         dismiss_alert(driver)
 
-        # Try the click again
         try:
 
             driver.execute_script(
@@ -197,12 +299,16 @@ def safe_click(driver, element):
         except Exception as e:
 
             print(
-                f"Could not click element after dismissing alert: {e}"
+                f"Could not click element after "
+                f"dismissing alert: {e}"
             )
 
             raise
 
-    # Handle an alert that appeared after clicking
+    # --------------------------------------------------------
+    # Handle alert that appeared after clicking
+    # --------------------------------------------------------
+
     dismiss_alert(driver)
 
 
@@ -215,7 +321,7 @@ def search(driver, date):
     Search Merolagani floorsheet for a given date.
 
     Date format:
-        mm/dd/yyyy
+        MM/DD/YYYY
     """
 
     print(
@@ -237,7 +343,7 @@ def search(driver, date):
     except UnexpectedAlertPresentException:
 
         print(
-            "Alert appeared while opening the website."
+            "Alert appeared while opening website."
         )
 
         dismiss_alert(driver)
@@ -319,10 +425,7 @@ def search(driver, date):
     )
 
     # --------------------------------------------------------
-    # CLICK SEARCH
-    #
-    # This is where your original code was failing.
-    # The Merolagani notification alert can appear here.
+    # Click search
     # --------------------------------------------------------
 
     safe_click(
@@ -331,7 +434,7 @@ def search(driver, date):
     )
 
     # --------------------------------------------------------
-    # Give website time to process request
+    # Give website time to process
     # --------------------------------------------------------
 
     time.sleep(2)
@@ -343,7 +446,7 @@ def search(driver, date):
     dismiss_alert(driver)
 
     # --------------------------------------------------------
-    # Check for "no data" message
+    # Check for no-data message
     # --------------------------------------------------------
 
     try:
@@ -384,12 +487,8 @@ def search(driver, date):
 
 def get_page_table(driver):
     """
-    Extract the floorsheet table from the current page.
+    Extract the floorsheet table from current page.
     """
-
-    # --------------------------------------------------------
-    # Dismiss any active alert
-    # --------------------------------------------------------
 
     dismiss_alert(driver)
 
@@ -517,10 +616,6 @@ def scrape_data(driver, date):
     Search and scrape all floorsheet pages.
     """
 
-    # --------------------------------------------------------
-    # Search
-    # --------------------------------------------------------
-
     found = search(
         driver,
         date
@@ -593,7 +688,7 @@ def scrape_data(driver, date):
             )
 
             # ------------------------------------------------
-            # Check if disabled
+            # Check disabled
             # ------------------------------------------------
 
             classes = (
@@ -649,13 +744,12 @@ def scrape_data(driver, date):
         except UnexpectedAlertPresentException:
 
             print(
-                "Unexpected alert appeared while moving "
-                "to the next page."
+                "Unexpected alert appeared while "
+                "moving to next page."
             )
 
             dismiss_alert(driver)
 
-            # Try finding Next again
             try:
 
                 next_btn = driver.find_element(
@@ -687,7 +781,7 @@ def scrape_data(driver, date):
             break
 
     # --------------------------------------------------------
-    # Combine pages
+    # Combine all pages
     # --------------------------------------------------------
 
     if not all_pages:
@@ -695,6 +789,7 @@ def scrape_data(driver, date):
         return pd.DataFrame()
 
     print()
+
     print(
         f"Combining {len(all_pages)} pages..."
     )
@@ -828,6 +923,8 @@ def clean_df(df):
 def save_data(df, date):
     """
     Save dataframe to CSV.
+
+    Filename is based on the actual scraping date.
     """
 
     if df.empty:
@@ -848,7 +945,11 @@ def save_data(df, date):
     )
 
     # --------------------------------------------------------
-    # Create filename
+    # Convert date to filename
+    #
+    # 08/19/2026
+    #      ↓
+    # 08_19_2026.csv
     # --------------------------------------------------------
 
     file_name = date.replace(
@@ -876,6 +977,10 @@ def save_data(df, date):
         "DATA SAVED SUCCESSFULLY"
     )
     print("=" * 60)
+
+    print(
+        f"Scraped Date: {date}"
+    )
 
     print(
         f"File: {file_path}"
@@ -908,15 +1013,39 @@ def main():
     print("=" * 60)
 
     # --------------------------------------------------------
-    # Today's date
+    # Determine date
+    #
+    # If SCRAPE_DATE is provided:
+    #     use that date
+    #
+    # Otherwise:
+    #     use today's/run date
     # --------------------------------------------------------
 
-    date = datetime.today().strftime(
-        "%m/%d/%Y"
-    )
+    try:
 
+        date = get_scrape_date()
+
+    except ValueError as e:
+
+        print()
+        print("=" * 60)
+        print(
+            "INVALID DATE"
+        )
+        print("=" * 60)
+
+        print(
+            str(e)
+        )
+
+        print("=" * 60)
+
+        sys.exit(1)
+
+    print()
     print(
-        f"Date: {date}"
+        f"Date selected for scraping: {date}"
     )
 
     driver = None
@@ -927,6 +1056,7 @@ def main():
         # Start browser
         # ----------------------------------------------------
 
+        print()
         print(
             "Starting Chrome..."
         )
@@ -951,6 +1081,10 @@ def main():
             print()
             print(
                 "No floorsheet data found."
+            )
+
+            print(
+                f"Date searched: {date}"
             )
 
             print(
@@ -1014,9 +1148,11 @@ def main():
                 pass
 
     print()
+    print("=" * 60)
     print(
-        "Script completed successfully."
+        "SCRIPT COMPLETED SUCCESSFULLY"
     )
+    print("=" * 60)
 
 
 # ============================================================
